@@ -1,0 +1,648 @@
+\documentclass{article}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{booktabs} 
+\usepackage{array}
+\usepackage{amssymb}
+\usepackage{tikz}
+\usepackage{float}
+\usetikzlibrary{shapes, arrows, positioning, fit}
+\usepackage[utf8]{inputenc}
+\usepackage[spanish]{babel}
+\title{Laboratorio 3}
+\author{Michelle Sayas y Jose Rodriguez}
+\date{March 2026}
+
+\begin{document}
+
+\maketitle
+
+\section{Cómo se organiza la memoria cuando un sistema utiliza memory-mapped 
+I/O.}
+En Memory-Mapped I/O, no hay separación física ni lógica entre la memoria y los dispositivos. El procesador ve un único espacio de direcciones continuo donde:
+\begin{itemize}
+    \item Algunas direcciones corresponden a celdas de memoria RAM
+
+    \item Otras direcciones corresponden a registros de dispositivos periféricos
+
+    \item Es como si tu computador tuviera una "calle" (bus de direcciones) con números de casa (direcciones). Algunas casas son RAM, otras son sensores, otras son actuadores.
+\end{itemize}
+
+\subsection{¿Cómo se organiza la memoria cuando un sistema utiliza memory-mapped I/O?}
+
+En Memory-Mapped I/O, los registros de los dispositivos periféricos se asignan a direcciones específicas del espacio de memoria del procesador. Esto significa que:
+
+\begin{itemize}
+    \item Cada registro del dispositivo tiene una dirección de memoria única.
+
+    \item El procesador accede a estos registros usando las mismas instrucciones que usa para acceder a la RAM (lw y sw).
+
+    \item No hay diferencia en cómo el procesador ve el acceso a memoria versus el acceso a periféricos.
+\end{itemize}
+
+Ventajas de esta Organización
+\begin{itemize}
+    \item Uniformidad: Mismas instrucciones para todo
+
+    \item Protección: La MMU puede proteger direcciones de periféricos
+
+    \item Caché: Se puede controlar si las direcciones de periféricos son cacheadas o no (normalmente no se cachean)
+\end{itemize} 
+
+\subsection{¿En qué región de memoria se suelen mapear los dispositivos?}
+
+Normalmente se mapean en direcciones altas de memoria o en espacios reservados. En los ejercicios vemos:
+\begin{itemize}
+    \item Ejercicio 1 .asm: Usa .data 0x90000000 para el destino de lecturas, que es una dirección alta.
+    
+    En este ejercicio:
+    \begin{itemize}
+        \item     0x10010000: Es la dirección base donde están mapeados los registros del sensor
+
+        \item 0x90000000: Es una dirección en memoria RAM normal donde se GUARDA el resultado
+
+        NO es que el periférico esté en 0x90000000. Lo que ocurre es:
+
+        \item El sensor está mapeado en 0x10010000 (con sus registros en offsets)
+
+        \item El programa lee del sensor en 0x10010000 + offset
+
+        \item El resultado se guarda en una variable normal en 0x90000000 (RAM)
+
+    Es decir, 0x90000000 es solo almacenamiento de datos, NO es el periférico.
+    \end{itemize}
+
+    El sensor está mapeado en 0x10010000 (con sus registros en offsets)
+
+    El programa lee del sensor en 0x10010000 + offset
+
+    El resultado se guarda en una variable normal en 0x90000000 (RAM)
+
+    Es decir, 0x90000000 es solo almacenamiento de datos, NO es el periférico.
+
+    \item Ejercicio 2 .asm: Usa offsets desde una dirección base (1000, 1004, 1008, 1012) para acceder a registros.
+\end{itemize}
+\subsection{¿Qué implicaciones tiene para las instrucciones lw y sw?}
+Las instrucciones lw y sw funcionan igual para RAM y para dispositivos:
+\begin{itemize}
+    \item lw \$t1, 1004(\$s0)   Lee el registro de estado del sensor
+
+    \item sw \$t0, 1000(\$s0)   Escribe en el registro de control
+\end{itemize}
+
+En un sistema con Memory-Mapped I/O, las instrucciones lw y sw son las mismas que para memoria RAM, pero lo que ocurre "detrás de escena" es completamente diferente:  MISMA INSTRUCCIÓN, COMPORTAMIENTO DISTINTO.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{>{\bfseries}l p{4cm} p{4cm}}
+\toprule
+\multicolumn{1}{c}{\textbf{Aspecto}} & \textbf{Acceso a RAM} & \textbf{Acceso a Periférico} \\
+\midrule
+Instrucción & \texttt{lw \$t0, 0(\$s0)} & \texttt{lw \$t0, 1004(\$s0)} \\
+Destino     & Celdas de memoria & Registros hardware \\
+Efecto      & Solo leer/escribir datos & Puede activar hardware físico \\
+Tiempo      & Generalmente rápido (ns) & Puede ser lento (ms) \\
+Repetibilidad & Siempre igual & Puede cambiar por hardware \\
+\bottomrule
+\end{tabular}
+\caption{Comparación entre acceso a RAM y acceso a Periférico}
+\label{tab:comparacion}
+\end{table}
+Cuando se ejecuta sw en un periférico, NO ES COMO GUARDAR EN RAM. En RAM solo se guarda un valor; en un periférico ORDENAS UNA ACCIÓN.
+\begin{itemize}
+    \item sw NO guarda datos, ordena acciones
+
+    \item lw NO recupera datos guardados, captura estado/datos del mundo real
+
+    \item Los valores pueden cambiar inesperadamente
+
+    \item Se debe esperar porque el hardware es lento
+
+    \item No se puede confiar en caché ni en reordenamiento
+
+    \item Si el hardware falla, el programa también
+\end{itemize}
+
+\section{Memory-Mapped I/O vs. Puerto de E/S}
+
+\subsection{¿Cuál es la principal diferencia?}
+\begin{itemize}
+    \item Memory-Mapped I/O: Los dispositivos comparten el mismo espacio de direcciones que la memoria.
+
+    \item Port I/O: Los dispositivos tienen un espacio de direcciones separado, con instrucciones especiales (ej: IN/OUT en x86).
+\end{itemize}
+\begin{table}[h]
+\centering
+\begin{tabular}{>{\bfseries}l p{4cm} p{4cm}}
+\toprule
+{\textbf{Característica}} & \textbf{Memory-Mapped I/O} & \textbf{Port I/O (E/S por puertos)} \\
+\midrule
+Espacio de direcciones & Único (compartido con RAM) & Separado (independiente de RAM) \\
+Instrucciones          & Mismas que memoria (\texttt{lw}/\texttt{sw}) & Instrucciones especiales (\texttt{in}/\texttt{out}) \\
+Identificación         & Por dirección & Por número de puerto \\
+\bottomrule
+\end{tabular}
+\caption{Comparación entre Memory-Mapped I/O y Port I/O}
+\label{tab:comparacion2}
+\end{table}
+\subsection{Ventajas y Desventajas}
+\begin{itemize}
+    \item Memory-Mapped I/O
+    \begin{itemize}
+        \item Ventajas:
+
+        Instrucciones más simples: Solo necesitas lw y sw.
+
+        Modos de direccionamiento: Puedes usar índices, offsets, etc.
+
+        Lenguajes de alto nivel: Se puede acceder como punteros en C.
+
+        Protección: Usa mismo sistema de protección que memoria.
+
+        \item Desventajas:
+        
+        Consume espacio de direcciones: Cada periférico ocupa direcciones que podrían ser para RAM.
+
+        Caché: Hay que gestionar qué direcciones no se cachean.
+
+        Decodificación: Necesita decodificador más complejo.
+    \end{itemize}
+    \item Port I/O
+    \begin{itemize}
+        \item Ventajas:
+        
+        No consume espacio de memoria: Las direcciones de memoria son solo para RAM.
+
+        Instrucciones especializadas: Indican claramente que es E/S.
+
+        Decodificación más simple: Líneas separadas para memoria y E/S.
+        
+        \item Desventajas:
+
+        Más instrucciones: El procesador necesita in/out además de lw/sw.
+
+        Lenguajes de alto nivel: Necesita funciones especiales (inb()/outb()).
+
+        Modos limitados: No se puede usar todos los modos de direccionamiento.
+        
+    \end{itemize}
+\end{itemize}
+\subsection{ ¿CUÁL ES MEJOR?}
+Depende del contexto:
+\begin{itemize}
+    \item Para sistemas pequeños/embebidos:
+Memory-Mapped es perfecto (simple, rápido).
+
+    \item Para computadoras generales:
+Híbrido (x86) aprovecha lo mejor de ambos.
+
+    \item Para sistemas críticos:
+Port I/O da más seguridad (separación física).
+
+    \item En nuestro caso, MIPS32 usa Memory-Mapped I/O porque:
+
+    Es más simple de implementar en hardware
+
+    Suficiente para sistemas embebidos
+
+    Coherente con filosofía RISC
+
+\end{itemize}
+\section{Problemas de direcciones solapadas}
+En Memory-Mapped I/O, cada dirección física debe corresponder a UN SOLO dispositivo. Si dos dispositivos responden a la misma dirección, ocurre un conflicto en el bus.
+\begin{table}[h]
+\centering
+\begin{tabular}{>{\bfseries}l >{\RaggedRight}p{3.5cm} >{\RaggedRight}p{4cm}}
+\toprule
+{\textbf{Problema}} \\
+\midrule
+Contención en el bus & Dos dispositivos intentan poner datos simultáneamente & Corrupción de datos, posible daño hardware \\
+\midrule
+Comandos erróneos & Dispositivo recibe comandos destinados a otro & Comportamiento impredecible del periférico \\
+\midrule
+Lecturas ambiguas & El procesador recibe datos mezclados & Valores incorrectos en el programa \\
+\midrule
+Fallos de sincronización & Estados de dispositivos se alteran & Sistemas en estados inconsistentes \\
+\bottomrule
+\end{tabular}
+\caption{Problemas por solapamiento de direcciones en Memory-Mapped I/O}
+\label{tab:problemas_solapamiento}
+\end{table}
+\subsection{Como evitar estos conflictos:}
+\begin{itemize}
+    \item Asignar rangos exclusivos a cada periférico.
+    \item Documentar todos los rangos en el código.
+    \item Usar constantes simbólicas en lugar de números mágicos.
+    \item Verificar que los rangos no se solapan.
+    \item Encapsular acceso en funciones.
+    \item Incluir comprobaciones en tiempo de desarrollo.
+    \item Usar decodificador hardware adecuado.
+    \item Configurar protección (MMU/MPU) si está disponible.
+    \item Probar cada periférico independientemente.
+    \item Revisar al añadir nuevos dispositivos.
+\end{itemize}
+\begin{table}[h]
+\centering
+\begin{tabular}{>{\bfseries}l >{\RaggedRight}p{3.5cm} >{\RaggedRight}p{4cm}}
+\toprule
+\multicolumn{1}{c}{\textbf{Nivel}} & \multicolumn{1}{c}{\textbf{Técnica}} & \multicolumn{1}{c}{\textbf{Ejemplo}} \\
+\midrule
+Hardware & Decodificador exclusivo & Chip select por dispositivo \\
+\midrule
+Hardware & Rangos únicos & Cada periférico en su bloque \\
+\midrule
+Hardware & MMU/MPU & Protección por páginas \\
+\midrule
+Software & Constantes simbólicas & \texttt{.eqv PRESION\_CONTROL 1000} \\
+\midrule
+Software & Encapsulación & Funciones por dispositivo \\\midrule
+Software & Constantes simbólicas & \texttt{.eqv PRESION\_CONTROL 1000} \\
+\midrule
+Software & Encapsulación & Funciones por dispositivo \\
+\midrule
+Software & Documentación & Comentarios de rangos \\
+\midrule
+Diseño & Tabla de asignación & Documento de diseño \\
+\midrule
+Pruebas & Verificación & Testear cada periférico \\
+\bottomrule
+\end{tabular}
+\caption{Técnicas para evitar problemas de solapamiento de direcciones}
+\label{tab:tecnicas_evitar_solapamiento}
+\end{table}
+\section{Simplificación del conjunto de instrucciones}
+¿Por qué el memory-mapped I/O simplifica el diseño del conjunto de instrucciones?
+
+Porque no necesita instrucciones especiales para E/S. Las mismas lw/sw sirven para todo.
+\begin{itemize}
+    \item Filosofía RISC: Menos instrucciones = procesador más rápido y simple
+    \item Sistemas embebidos: Donde se usa MIPS, hay pocos periféricos.
+    \item Uniformidad: Mismo modelo de programación para todo.
+    \item Eficiencia: Aprovecha el bus de memoria existente.
+    \item Legado de diseño: MIPS siempre usó este enfoque.
+\end{itemize}
+\section{Acceso a nivel de bus:}
+\subsection{¿Qué ocurre en el bus cuando se accede a una dirección de dispositivo?}
+\begin{itemize}
+    \item El procesador coloca la dirección en el bus de direcciones.
+    \item Activa la señal de lectura/escritura.
+    \item El decodificador de direcciones determina si la dirección pertenece a RAM o a un periférico.
+    \item Activa la señal de chip select correspondiente al dispositivo.
+\end{itemize}
+\subsection{¿Cómo sabe el hardware que debe acceder a un periférico?}
+Mediante un decodificador de direcciones que compara la dirección con los rangos asignados a cada dispositivo.
+
+El componente clave es el decodificador de direcciones, un circuito combinacional que:
+\begin{itemize}
+    \item Recibe la dirección que el procesador quiere acceder.
+    \item Determina a qué dispositivo pertenece esa dirección.
+    \item Activa la señal correspondiente (chip select) para ese único dispositivo.
+\end{itemize}
+\section{ Acceso desde programas sin privilegios}
+\subsection{¿Es posible que un programa normal acceda a un dispositivo mapeado?}
+
+Depende del sistema operativo:
+\begin{itemize}
+    \item En sistemas con protección de memoria (MMU), las direcciones de dispositivos están en espacio kernel.
+    \item Un programa usuario no puede acceder directamente sin un driver.
+\end{itemize}
+\subsection{Mecanismos de protección:}
+\begin{itemize}
+    \item MMU: Asigna permisos por página.La MMU es un componente hardware que traduce direcciones virtuales a físicas y verifica permisos en cada acceso.
+    \item Excepciones: El SO atrapa accesos no autorizados.Es una interrupción síncrona generada por el procesador cuando algo anormal ocurre:
+    
+    Causas comunes de excepción:
+    \begin{itemize}
+        \item Acceso a dirección no válida
+        \item Acceso sin permisos
+        \item Instrucción ilegal
+        \item División por cero
+        \item Syscall (excepción voluntaria)
+    \end{itemize}
+    \item Modos de operación: Kernel vs. Usuario.
+    \begin{table}[h]
+\centering
+\begin{tabular}{l >{\centering\arraybackslash}p{2.5cm} >{\centering\arraybackslash}p{2.5cm}}
+\toprule
+\multicolumn{1}{c}{\textbf{Operación}} & \multicolumn{1}{c}{\textbf{Modo Usuario}} & \multicolumn{1}{c}{\textbf{Modo Kernel}} \\
+\midrule
+Acceder a RAM propia & \checkmark Sí & \checkmark Sí \\
+\midrule
+Acceder a RAM de otro programa & \texttimes\; No (MMU lo impide) & \checkmark Sí \\
+\midrule
+Acceder a periféricos & \texttimes\; No (MMU) & \checkmark Sí \\
+\midrule
+Ejecutar \texttt{lw/sw} & \checkmark Sí & \checkmark Sí \\
+\midrule
+Ejecutar \texttt{mtc0} (escribir en registros CPU) & \texttimes\; No & \checkmark Sí \\
+\midrule
+Modificar tabla de páginas & \texttimes\; No & \checkmark Sí \\
+\midrule
+Hacer \texttt{syscall} & \checkmark Sí & \checkmark Sí \\
+\bottomrule
+\end{tabular}
+\caption{Operaciones permitidas en Modo Usuario vs Modo Kernel}
+\label{tab:modos_operacion}
+\end{table}
+\end{itemize}
+\section{Evitar esperas activas innecesarias}
+\subsection{¿Qué técnicas se pueden emplear?}
+ESPERA ACTIVA (BUSY WAITING)
+\\
+Ejercicio: ESPERA ACTIVA (INEFICIENTE)
+esperar\_medicion:
+\\
+    lw \$t1, 1004(\$s0)      Leer estado
+    \\
+    beqz \$t1, esperar\_medicion   Si es 0, vuelve a leer
+    \\
+    Cuando sale de aquí, el sensor está listo
+    \\
+
+El problema es que el procesador está ocupado todo el tiempo preguntando, sin hacer nada útil.
+
+\subsection{TÉCNICA 1: INTERRUPCIONES}
+El dispositivo avisa al procesador cuando está listo, permitiendo que el procesador haga otras tareas mientras espera.
+\section*{Comparación: Espera Activa vs Interrupciones}
+
+\subsection*{Sin interrupciones (espera activa)}
+
+\begin{center}
+\begin{tikzpicture}
+    % Cuadros de tiempo
+    \foreach \x in {0,1,2,3,4,5} {
+        \node[draw, minimum width=1.2cm, minimum height=0.8cm] at (\x*1.2, 0) {Esperar};
+    }
+    \node[draw, minimum width=1.2cm, minimum height=0.8cm, fill=green!20] at (6*1.2, 0) {Procesar};
+      % Línea de tiempo
+    \draw[->] (-0.5, -0.5) -- (7.5*1.2, -0.5);
+    
+    % Texto explicativo
+    \node[below, align=center] at (3.5*1.2, -1.0) 
+        {\texttt{└────────── 100\% ocupado ──────────┘}};
+    
+    % Etiqueta
+    \node[above] at (0, 0.5) {PROCESADOR:};
+\end{tikzpicture}
+\end{center}
+
+\subsection*{Con interrupciones}
+\begin{center}
+\begin{tikzpicture}
+    % Primera tarea (Tarea A)
+    \foreach \x in {0,1,2,3} {
+        \node[draw, minimum width=1.2cm, minimum height=0.8cm, fill=blue!10] 
+            at (\x*1.2, 0) {Tarea A};
+    }
+    
+    % Punto de interrupción
+    \node[draw, minimum width=1.2cm, minimum height=0.8cm, fill=red!20] 
+        at (4*1.2, 0) {¡IRQ!};
+    
+    % Procesar datos
+    \node[draw, minimum width=1.2cm, minimum height=0.8cm, fill=green!20] 
+        at (5*1.2, 0) {Procesar};   % Vuelta a Tarea A
+    \node[draw, minimum width=1.2cm, minimum height=0.8cm, fill=blue!10] 
+        at (6*1.2, 0) {Tarea A};
+    
+    % Línea de tiempo
+    \draw[->] (-0.5, -0.5) -- (7.5*1.2, -0.5);
+    
+    % Texto explicativo
+    \node[below, align=center] at (2.5*1.2, -1.0) 
+        {\texttt{└── Trabajo útil ──┘}};
+    
+    % Flecha hacia arriba para interrupción
+    \draw[->, red, thick] (4*1.2, -1.5) -- (4*1.2, -0.5);
+    \node[below, red] at (4*1.2, -1.7) {¡Interrupción!};
+      % Texto para la parte final
+    \node[below, align=center] at (6.5*1.2, -1.0) 
+        {\texttt{└── Trabajo útil}};
+    
+    % Etiqueta
+    \node[above] at (0, 0.5) {PROCESADOR:};
+\end{tikzpicture}
+\end{center}
+
+Ventajas:
+\begin{itemize}
+    \item Aprovecha tiempo del procesador
+    \item Eficiente para eventos poco frecuentes
+    \item Escalable a múltiples dispositivos
+    \item Bueno para sistemas de tiempo real
+\end{itemize}
+Desventajas:
+\begin{itemize}
+    \item Mayor complejidad de programación
+    \item  Sobrecarga por cambio de contexto
+    \item Posibles condiciones de carrera
+    \item Necesita hardware de interrupciones
+\end{itemize}
+\subsection{TÉCNICA 2: DMA (DIRECT MEMORY ACCESS)}
+El dispositivo escribe directamente en memoria sin involucrar al procesador.
+\subsection{Mejor: DMA + Interrupción}
+Ventajas
+\begin{itemize}
+    \item Transferencias muy rápidas
+    \item  Procesador completamente libre
+    \item Ideal para grandes bloques de datos
+    \item Mínima latencia
+\end{itemize}
+Desventajas:
+\begin{itemize}
+    \item Requiere hardware específico (controlador DMA)
+    \item Complejidad de configuración
+    \item Problemas de coherencia de caché
+    \item Gestión de memoria física contigua
+\end{itemize}
+\subsection{TÉCNICA 3: TEMPORIZADORES (TIMEOUT)}
+Esperar un tiempo fijo en lugar de preguntar constantemente.
+Ventajas:
+\begin{itemize}
+    \item  Evita esperas infinitas
+    \item  Simple de implementar
+    \item Útil para detectar fallos
+    \item  Portable
+\end{itemize}
+Desventajas:
+\begin{itemize}
+    \item Si el tiempo es muy corto, sigue siendo ineficiente
+    \item Si es muy largo, retrasa la respuesta
+    \item No aprovecha el procesador
+    \item  Depende de la precisión del reloj
+\end{itemize}
+\subsection{TÉCNICA 4: MULTITAREA (CONTEXT SWITCHING)}
+El sistema operativo cambia a otra tarea mientras una espera.
+Ventajas:
+\begin{itemize}
+    \item Máximo aprovechamiento del CPU
+    \item Transparente al programador
+    \item  Escalable a muchos procesos
+    \item E/S puede ser bloqueante
+\end{itemize}
+Desventajas: 
+\begin{itemize}
+    \item Requiere sistema operativo
+    \item Sobrecarga por cambio de contexto
+    \item Latencia impredecible
+    \item Complejidad de implementación
+\end{itemize}
+\subsection{COMPARACIÓN DE TÉCNICAS}
+\\
+\begin{table}[H]
+\centering
+\begin{tabular}{l c c c p{4cm}}
+\toprule
+\textbf{Técnica} & \textbf{Complejidad} & \textbf{Eficiencia} & \textbf{Latencia} & \textbf{Hardware necesario} \\
+\midrule
+Espera activa & Muy baja & Pésima & Baja & Ninguno \\
+\midrule
+Interrupciones & Media & Alta & Media & Controlador de interrupciones \\
+\midrule
+DMA & Alta & Muy alta & Muy baja & Controlador DMA \\
+\midrule
+Temporizadores & Baja & Media & Variable & Temporizador \\
+\midrule
+Multitarea & Muy alta & Alta & Variable & MMU, SO \\
+\bottomrule
+\end{tabular}
+\caption{Comparación de técnicas para evitar esperas activas}
+\label{tab:tecnicas_io}
+\end{table}
+\\
+\section{Análisis y Discusión de los Resultados}
+Los ejercicios presentados implementan sistemas de sensores mediante la técnica de Memory-Mapped I/O en un procesador MIPS32 de 32 bits. Esta práctica permite comprender los fundamentos de la comunicación entre el procesador y los periféricos en sistemas embebidos, así como las implicaciones de diseño tanto a nivel hardware como software.
+\\
+\\
+El análisis se estructura en torno a tres aspectos fundamentales:
+\begin{itemize}
+    \item Correctitud funcional: ¿Los programas hacen lo que deben?
+    \item Eficiencia: ¿Cómo de óptimos son los algoritmos de acceso?
+    \item Robustez: ¿Manejan adecuadamente las situaciones de error?
+\end{itemize} 
+\subsection{Sensor de Tension:}
+El código muestra correctamente cómo se accede a los registros del periférico mediante offsets desde una dirección base, lo que es precisamente la esencia del Memory-Mapped I/O.
+\\
+\\
+esperar\_medicion:
+\\
+    lw \$t1, 1004(\$s0)
+    \\
+    beqz \$t1, esperar\_medicion
+
+Aunque ineficiente, esta implementación refleja fielmente el comportamiento de sistemas embebidos simples sin soporte de interrupciones.
+
+Separación de la lógica de control:
+\\
+La función Controlador\_tension encapsula toda la lógica de comunicación con el sensor, lo que facilita la reutilización y el mantenimiento del código.
+
+Análisis de eficiencia:
+\begin{itemize}
+    \item Ventaja: Respuesta inmediata cuando el sensor está listo.
+
+    \item Desventaja: El procesador está 100\% ocupado durante la espera, sin poder realizar otras tareas.
+
+    \item Costo: Si la medición tarda 1ms y el procesador corre a 100MHz, se desperdician 100,000 ciclos de reloj.
+    
+\end{itemize}
+Metrica de Ineficiencia:
+\\
+Tiempo de espera = 1ms\\
+Ciclos desperdiciados = 1ms × 100MHz = 100,000 ciclos\\
+Trabajo útil = 0%\\
+
+\subsection{SENSOR DE LUMINOSIDAD:}
+Separación clara entre periférico y almacenamiento:
+\begin{itemize}
+    \item 0x10010000: Dirección donde está mapeado el sensor
+
+    \item 0x90000000: Dirección en RAM para guardar resultados
+\end{itemize}
+ Memory-Mapped I/O en la práctica
+ \\
+ \\Los ejercicios demuestran correctamente el concepto fundamental de Memory-Mapped I/O: los registros de los periféricos aparecen en el espacio de direcciones del procesador y se accede a ellos con las mismas instrucciones que a la memoria RAM.
+ \\
+ Ventajas observadas:
+ \begin{itemize}
+     \item Uniformidad: Las mismas instrucciones lw/sw sirven para RAM y periféricos.
+     \item Simplicidad: El código es fácil de entender y mantener.
+     \item Eficiencia: Acceso directo sin necesidad de instrucciones especiales.
+ \end{itemize}
+Limitaciones observadas:
+\begin{itemize}
+    \item Protección: En los simuladores no hay MMU, por lo que cualquier programa puede acceder a cualquier dirección.
+    \item Sincronización: La espera activa es ineficiente pero necesaria en sistemas sin interrupciones.
+    \item Portabilidad: Las direcciones específicas hacen que el código no sea portable.
+\end{itemize}
+Análisis de la espera activa (busy waiting)
+\\
+La espera activa es la técnica más simple pero también la más ineficiente para sincronizar con periféricos lentos. El procesador consume ciclos de reloj continuamente verificando el estado del dispositivo, sin realizar trabajo útil.
+\\
+Impacto en el rendimiento:
+\begin{itemize}
+    \item CPU bound: El procesador está completamente ocupado.
+    \item Throughput: No se puede realizar otras tareas concurrentemente.
+    \item Consumo energético: Máximo durante toda la espera.
+\end{itemize}
+Alternativas no implementadas:
+\begin{itemize}
+    \item Interrupciones: El sensor avisaría cuando está listo.
+    \item Timeout: Evitaría bucles infinitos si el sensor falla.
+    \item DMA: Transferiría datos directamente a memoria.
+\end{itemize}
+Implicaciones de las direcciones altas:\\
+\\
+El Ejercicio 2 usa .data 0x90000000 para almacenar resultados. Esto plantea cuestiones interesantes:
+\\
+¿Es 0x90000000 una dirección de periférico o de RAM?
+\\
+En sistemas MIPS reales, las direcciones altas suelen corresponder a periféricos o memoria especial.
+\\
+\\
+En este caso, parece usarse como RAM normal para guardar resultados.
+\\
+\\
+Ventaja: Demuestra que el programa puede usar direcciones altas para almacenamiento.\\
+\\
+\\
+Desventaja: Puede causar confusión sobre qué es periférico y qué es RAM.
+\\
+\\
+Comprensión fundamental: Los ejercicios demuestran correctamente el concepto de Memory-Mapped I/O, donde los periféricos aparecen en el espacio de direcciones del procesador.
+\\
+\\
+Implementación funcional: Ambos programas realizan lecturas de sensores y muestran resultados, cumpliendo la funcionalidad básica.
+\\
+\\
+Separación de conceptos: Se distingue claramente entre las direcciones de los periféricos y las variables de almacenamiento.
+\\
+\\
+Limitaciones:
+\begin{itemize}
+    \item Falta de robustez: Ningún ejercicio maneja adecuadamente situaciones de error.
+    \item Simulación simplificada: El estado de los sensores se modifica manualmente, no por hardware.
+    \item Espera activa ineficiente: No se aprovecha el procesador durante las esperas.
+    \item Inicializaciones incorrectas: Los registros de periféricos no deben inicializarse en .data.
+\end{itemize}
+Importante:
+\begin{itemize}
+    \item Memory-Mapped I/O simplifica el hardware pero requiere cuidado en la asignación de direcciones.
+
+    \item La espera activa es simple pero ineficiente para periféricos lentos.
+
+    \item La gestión de errores es crucial en sistemas que interactúan con hardware real.
+
+    \item La documentación de rangos de direcciones es esencial para evitar conflictos.
+
+    \item Los simuladores tienen limitaciones y no reflejan todos los aspectos del hardware real.
+\end{itemize}
+Los ejercicios proporcionan una base sólida para entender Memory-Mapped I/O en MIPS32, pero representan una versión simplificada de un sistema real. Para llevar estos conceptos a la práctica profesional, sería necesario:
+\begin{itemize}
+    \item Implementar manejo robusto de errores con timeouts y reintentos.
+    \item Utilizar interrupciones en lugar de espera activa.
+    \item Gestionar correctamente la inicialización de periféricos.
+    \item Documentar exhaustivamente la asignación de direcciones.
+    \item Considerar la protección de memoria en sistemas con múltiples procesos.
+\end{itemize}
+En definitiva, estos ejercicios son un excelente punto de partida para comprender los fundamentos, pero el desarrollo de sistemas embebidos profesionales requiere ir más allá, incorporando técnicas de eficiencia, robustez y seguridad que aquí no se han implementado.
+\\
+\end{document}
